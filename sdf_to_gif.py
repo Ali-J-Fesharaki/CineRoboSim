@@ -87,7 +87,7 @@ def euler_to_quaternion(roll, pitch, yaw):
     qw = np.cos(roll/2) * np.cos(pitch/2) * np.cos(yaw/2) + np.sin(roll/2) * np.sin(pitch/2) * np.sin(yaw/2)
     return {'x': qx, 'y': qy, 'z': qz, 'w': qw}
 
-def calculate_lookat_quaternion(eye_x, eye_y, eye_z, target_x, target_y, target_z):
+def calculate_lookat_quaternion(eye_x, eye_y, eye_z, target_x, target_y, target_z, prev_yaw=None):
     """
     Calculates the quaternion to point a camera at a target.
     Uses Gazebo convention where camera looks along a direction.
@@ -95,9 +95,10 @@ def calculate_lookat_quaternion(eye_x, eye_y, eye_z, target_x, target_y, target_
     Args:
         eye_x, eye_y, eye_z: Camera position
         target_x, target_y, target_z: Point to look at
+        prev_yaw: Previous yaw angle (optional, for smooth transitions)
     
     Returns:
-        dict with quaternion components {x, y, z, w}
+        tuple: (dict with quaternion components {x, y, z, w}, current yaw angle)
     """
     # Vector from eye to target (forward direction)
     dx = target_x - eye_x
@@ -108,7 +109,7 @@ def calculate_lookat_quaternion(eye_x, eye_y, eye_z, target_x, target_y, target_
     dist = math.sqrt(dx**2 + dy**2 + dz**2)
     
     if dist == 0:
-        return {'x': 0, 'y': 0, 'z': 0, 'w': 1}
+        return {'x': 0, 'y': 0, 'z': 0, 'w': 1}, 0.0
     
     # Normalize forward vector
     fx = dx / dist
@@ -122,11 +123,22 @@ def calculate_lookat_quaternion(eye_x, eye_y, eye_z, target_x, target_y, target_
     # Calculate yaw (rotation around Z-axis, left/right)
     yaw = math.atan2(fy, fx)
     
+    # Smooth yaw transition to avoid 360->0 spike
+    # Unwrap yaw to be continuous with previous yaw
+    if prev_yaw is not None:
+        # Calculate the difference and wrap to [-pi, pi]
+        yaw_diff = yaw - prev_yaw
+        while yaw_diff > math.pi:
+            yaw_diff -= 2 * math.pi
+        while yaw_diff < -math.pi:
+            yaw_diff += 2 * math.pi
+        yaw = prev_yaw + yaw_diff
+    
     # Roll is 0 (no banking)
     roll = 0.0
     
     # Convert to quaternion
-    return euler_to_quaternion(roll, pitch, yaw)
+    return euler_to_quaternion(roll, pitch, yaw), yaw
 
 def take_screenshot(cmd='ign'):
     """Trigger internal screenshot service - saves to default location (~/.ignition/gui/pictures/)"""
@@ -434,6 +446,9 @@ def animate_orbit(focal_x, focal_y, focal_z,
     
     print(f"  Orbit: {num_frames} frames, radius={orbit_radius:.1f}m, height={orbit_height:.1f}m")
     
+    # Track previous yaw for smooth rotation transitions
+    prev_yaw = None
+    
     for i in range(num_frames):
         # Calculate angle (one full circle = 2*pi)
         progress = i / num_frames
@@ -444,8 +459,8 @@ def animate_orbit(focal_x, focal_y, focal_z,
         cam_y = focal_y + orbit_radius * math.sin(theta)
         cam_z = orbit_height
         
-        # Calculate orientation to look at focal point
-        q = calculate_lookat_quaternion(cam_x, cam_y, cam_z, focal_x, focal_y, focal_z)
+        # Calculate orientation to look at focal point (with yaw unwrapping)
+        q, prev_yaw = calculate_lookat_quaternion(cam_x, cam_y, cam_z, focal_x, focal_y, focal_z, prev_yaw)
         
         # Move camera
         move_camera_quat(cam_x, cam_y, cam_z, q['x'], q['y'], q['z'], q['w'], cmd)
@@ -557,7 +572,7 @@ def capture_frames(sdf_file, output_gif, frames=60, radius=15.0, height=10.0, cm
         
         print(f"\nPHASE 2: Unzoom animation ({unzoom_frames} frames)...")
         
-        end_distance = start_distance * 3.0  # Zoom out to 3x
+        end_distance = height  # Unzoom to the specified height argument
         
         unzoom_captured, (final_x, final_y, final_z) = animate_unzoom(
             start_x, start_y, start_z,
