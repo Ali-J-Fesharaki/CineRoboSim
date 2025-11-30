@@ -482,7 +482,7 @@ def animate_orbit(focal_x, focal_y, focal_z,
 # MAIN CAPTURE FUNCTION
 # =============================================================================
 
-def capture_frames(sdf_file, output_gif, frames=60, radius=15.0, height=10.0, cmd='ign'):
+def capture_frames(sdf_file, output_gif, frames=60, radius=15.0, height=10.0, cmd='ign', reverse=False, pingpong=False):
     """Launch Gazebo, perform unzoom + orbit animation, capture frames, create GIF"""
     
     print(f"\n{'='*60}")
@@ -622,7 +622,16 @@ def capture_frames(sdf_file, output_gif, frames=60, radius=15.0, height=10.0, cm
         print(f"  Total frames: {len(all_frames)} ({len(unzoom_captured)} unzoom + {len(orbit_captured)} orbit)")
 
         # Create GIF
-        images = [Image.open(f) for f in all_frames]
+        # Optionally reverse or pingpong the frame order
+        if pingpong:
+            # Forward + reversed (excluding duplicate endpoints)
+            frames_for_gif = all_frames + list(reversed(all_frames[1:-1]))
+        elif reverse:
+            frames_for_gif = list(reversed(all_frames))
+        else:
+            frames_for_gif = all_frames
+
+        images = [Image.open(f) for f in frames_for_gif]
         images[0].save(
             output_gif,
             save_all=True,
@@ -654,6 +663,8 @@ def main():
     parser.add_argument("--frames", type=int, default=30, help="Number of frames per GIF")
     parser.add_argument("--radius", type=float, default=15.0, help="Orbit radius")
     parser.add_argument("--height", type=float, default=10.0, help="Camera height")
+    parser.add_argument("--reverse", action='store_true', help="Save GIF with frames in reverse order")
+    parser.add_argument("--pingpong", action='store_true', help="Play GIF forward then backward (smooth loop)")
     parser.add_argument("--cmd", default="ign", help="Command prefix (ign or gz)")
     
     args = parser.parse_args()
@@ -682,7 +693,7 @@ def main():
                 os.makedirs("gifs")
         
         print(f"Processing single file: {input_path} -> {output_gif}")
-        capture_frames(input_path, output_gif, args.frames, args.radius, args.height, args.cmd)
+        capture_frames(input_path, output_gif, args.frames, args.radius, args.height, args.cmd, args.reverse, args.pingpong)
     
     elif os.path.isdir(input_path):
         # Directory/batch mode
@@ -707,7 +718,7 @@ def main():
                 print(f"Skipping {base_name} (GIF exists)")
                 continue
                 
-            capture_frames(sdf_file, output_gif, args.frames, args.radius, args.height, args.cmd)
+            capture_frames(sdf_file, output_gif, args.frames, args.radius, args.height, args.cmd, args.reverse, args.pingpong)
     else:
         print(f"Error: {input_path} does not exist")
 
